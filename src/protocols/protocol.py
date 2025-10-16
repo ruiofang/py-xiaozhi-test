@@ -102,6 +102,8 @@ class Protocol:
         message = {"session_id": self.session_id, "type": "abort"}
         if reason == AbortReason.WAKE_WORD_DETECTED:
             message["reason"] = "wake_word_detected"
+        
+        logger.debug(f"发送中止消息: {message}")
         await self.send_text(json.dumps(message))
 
     async def send_wake_word_detected(self, wake_word):
@@ -131,6 +133,8 @@ class Protocol:
             "state": "start",
             "mode": mode_map[mode],
         }
+        
+        logger.debug(f"发送监听消息: {message}")
         await self.send_text(json.dumps(message))
 
     async def send_stop_listening(self):

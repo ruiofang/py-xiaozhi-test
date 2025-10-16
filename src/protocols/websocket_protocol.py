@@ -67,6 +67,9 @@ class WebsocketProtocol(Protocol):
         try:
             # 在连接时创建 Event，确保在正确的事件循环中
             self.hello_received = asyncio.Event()
+            
+            # 重置session_id，等待服务器分配新的
+            self.session_id = ""
 
             # 判断是否应该使用 SSL
             current_ssl_context = None
@@ -482,6 +485,14 @@ class WebsocketProtocol(Protocol):
                 logger.error(f"不支持的传输方式: {transport}")
                 return
 
+            # 提取并保存session_id
+            session_id = data.get("session_id")
+            if session_id:
+                self.session_id = session_id
+                logger.info(f"收到服务器session_id: {session_id}")
+            else:
+                logger.warning("服务器hello消息中没有session_id")
+
             # 设置 hello 接收事件
             self.hello_received.set()
 
@@ -539,6 +550,9 @@ class WebsocketProtocol(Protocol):
         self.websocket = None
         self._last_ping_time = None
         self._last_pong_time = None
+        
+        # 重置session_id，连接断开时清除
+        self.session_id = ""
 
     async def close_audio_channel(self):
         """

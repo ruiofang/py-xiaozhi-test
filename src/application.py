@@ -68,6 +68,9 @@ class Application:
             ListeningMode.REALTIME if self.aec_enabled else ListeningMode.AUTO_STOP
         )
         self.keep_listening = False
+        
+        # 中断状态控制
+        self.aborted = False
 
         # 统一任务池（替代 _main_tasks/_bg_tasks）
         self._tasks: set[asyncio.Task] = set()
@@ -320,12 +323,18 @@ class Application:
                 elif state == "stop":
                     # 如果是手动打断的，则不执行任何操作
                     if self.aborted:
+                        logger.debug("TTS停止，但检测到用户已中断，不自动重启监听")
                         return
 
                     if self.keep_listening:
                         # 继续对话：根据当前模式重启监听
                         async def _restart_listening():
                             try:
+                                # 再次检查是否被中断，避免竞态条件
+                                if self.aborted:
+                                    logger.debug("重启监听时检测到中断，取消操作")
+                                    return
+                                    
                                 # REALTIME 且已在 LISTENING 时无需重复发送
                                 if not (
                                     self.listening_mode == ListeningMode.REALTIME
@@ -334,11 +343,12 @@ class Application:
                                     await self.protocol.send_start_listening(
                                         self.listening_mode
                                     )
-                            except Exception:
-                                pass
-                            self.keep_listening and await self.set_device_state(
-                                DeviceState.LISTENING
-                            )
+                                    logger.debug(f"TTS结束，重新发送监听命令: {self.listening_mode}")
+                                
+                                if self.keep_listening and not self.aborted:
+                                    await self.set_device_state(DeviceState.LISTENING)
+                            except Exception as e:
+                                logger.error(f"重启监听失败: {e}")
 
                         self.spawn(_restart_listening(), "state:tts_stop_restart")
                     else:
@@ -381,9 +391,12 @@ class Application:
         # 锁外广播，避免插件回调引起潜在的长耗时阻塞
         try:
             await self.plugins.notify_device_state_changed(state)
+            # 只有在明确进入LISTENING状态时才重置aborted标志
             if state == DeviceState.LISTENING:
-                await asyncio.sleep(0.5)
+                # 延迟一小段时间确保状态稳定后再重置aborted
+                await asyncio.sleep(0.1)
                 self.aborted = False
+                logger.debug("重置aborted状态，准备接收新的用户输入")
         except Exception:
             pass
 
@@ -434,10 +447,18 @@ class Application:
         logger.info(f"中止语音输出，原因: {reason}")
         self.aborted = True
         await self.protocol.send_abort_speaking(reason)
+        logger.debug(f"已发送中止命令，session_id: {getattr(self.protocol, 'session_id', 'unknown')}")
 
-        # 如果是保持聆听模式，则直接切换到聆听，否则回到IDLE
+        # 如果是保持聆听模式，则重新启动监听，否则回到IDLE
         if self.keep_listening:
-            await self.set_device_state(DeviceState.LISTENING)
+            try:
+                # 重新发送开始监听命令，确保服务端知道客户端准备接收新的输入
+                await self.protocol.send_start_listening(self.listening_mode)
+                logger.debug(f"已发送重新监听命令，模式: {self.listening_mode}, session_id: {getattr(self.protocol, 'session_id', 'unknown')}")
+                await self.set_device_state(DeviceState.LISTENING)
+            except Exception as e:
+                logger.error(f"重启监听失败: {e}")
+                await self.set_device_state(DeviceState.IDLE)
         else:
             await self.set_device_state(DeviceState.IDLE)
 

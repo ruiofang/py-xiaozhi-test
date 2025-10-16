@@ -142,16 +142,23 @@ class AudioPlugin(Plugin):
     def _should_send_microphone_audio(self) -> bool:
         """与应用状态机对齐：
 
-        - LISTENING 时发送
+        - LISTENING 时发送（且未被中断）
         - SPEAKING 且 keep_listening 模式时也发送（支持双工与打断）
         """
         try:
             if not self.app:
                 return False
-            if self.app.device_state == DeviceState.LISTENING and not self.app.aborted:
+            
+            # 安全获取aborted状态
+            aborted = getattr(self.app, "aborted", False)
+            
+            # LISTENING状态且未中断时发送
+            if self.app.device_state == DeviceState.LISTENING and not aborted:
                 return True
-            return self.app.device_state == DeviceState.SPEAKING and bool(
-                getattr(self.app, "keep_listening", False)
-            )
+                
+            # SPEAKING状态且保持监听模式时发送（支持打断）
+            return (self.app.device_state == DeviceState.SPEAKING and 
+                   bool(getattr(self.app, "keep_listening", False)) and 
+                   not aborted)
         except Exception:
             return False
