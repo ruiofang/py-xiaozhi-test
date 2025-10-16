@@ -71,6 +71,12 @@ class Application:
         
         # 中断状态控制
         self.aborted = False
+        
+        # 自动启动对话配置
+        try:
+            self.auto_start_conversation = bool(self.config.get_config("SYSTEM_OPTIONS.AUTO_START_CONVERSATION", True))
+        except Exception:
+            self.auto_start_conversation = True
 
         # 统一任务池（替代 _main_tasks/_bg_tasks）
         self._tasks: set[asyncio.Task] = set()
@@ -363,8 +369,18 @@ class Application:
 
     async def _on_audio_channel_opened(self):
         logger.info("协议通道已打开")
-        # 通道打开后进入 LISTENING（：简化为直读直写）
-        await self.set_device_state(DeviceState.LISTENING)
+        # 根据配置决定是否自动进入对话模式
+        if self.auto_start_conversation:
+            try:
+                await self.start_auto_conversation()
+                logger.info("已自动启动对话模式")
+            except Exception as e:
+                logger.error(f"自动启动对话模式失败: {e}")
+                # 回退到基础 LISTENING 状态
+                await self.set_device_state(DeviceState.LISTENING)
+        else:
+            # 不自动启动对话，仅设置为 LISTENING 状态
+            await self.set_device_state(DeviceState.LISTENING)
 
     async def _on_audio_channel_closed(self):
         logger.info("协议通道已关闭")

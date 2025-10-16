@@ -1,4 +1,5 @@
 import json
+from re import T
 import uuid
 from typing import Any, Dict
 
@@ -18,6 +19,7 @@ class ConfigManager:
         "SYSTEM_OPTIONS": {
             "CLIENT_ID": None,
             "DEVICE_ID": None,
+            "AUTO_START_CONVERSATION": True,
             "NETWORK": {
                 "OTA_VERSION_URL": "https://api.tenclass.net/xiaozhi/ota/",
                 "WEBSOCKET_URL": None,
@@ -36,6 +38,13 @@ class ConfigManager:
             "KEYWORDS_SCORE": 1.8,
             "KEYWORDS_THRESHOLD": 0.2,
             "NUM_TRAILING_BLANKS": 1,
+            "PLAY_BEEP_ON_WAKE": True,
+            "USE_MP3_SOUND": True,
+            "MP3_FILENAME": "wake_up.mp3",
+            "BEEP_FREQUENCY": 800.0,
+            "BEEP_DURATION": 0.5,
+            "BEEP_VOLUME": 0.3,
+            "USE_DOUBLE_BEEP": True,
         },
         "CAMERA": {
             "camera_index": 0,
@@ -145,17 +154,27 @@ class ConfigManager:
         try:
             # 首先尝试使用resource_finder查找配置文件
             config_file_path = resource_finder.find_file("config/config.json")
+            loaded_config = None
 
             if config_file_path:
                 logger.debug(f"使用resource_finder找到配置文件: {config_file_path}")
-                config = json.loads(config_file_path.read_text(encoding="utf-8"))
-                return self._merge_configs(self.DEFAULT_CONFIG, config)
+                loaded_config = json.loads(config_file_path.read_text(encoding="utf-8"))
 
             # 如果resource_finder没找到，尝试使用实例变量中的路径
-            if self.config_file.exists():
+            elif self.config_file.exists():
                 logger.debug(f"使用实例路径找到配置文件: {self.config_file}")
-                config = json.loads(self.config_file.read_text(encoding="utf-8"))
-                return self._merge_configs(self.DEFAULT_CONFIG, config)
+                loaded_config = json.loads(self.config_file.read_text(encoding="utf-8"))
+
+            if loaded_config is not None:
+                # 合并配置并检查是否需要更新
+                merged_config = self._merge_configs(self.DEFAULT_CONFIG, loaded_config)
+                
+                # 检查是否有新的配置项被添加
+                if self._has_new_config_items(loaded_config, merged_config):
+                    logger.info("检测到缺失的配置项，自动添加默认值")
+                    self._save_config(merged_config)
+                    
+                return merged_config
             else:
                 # 创建默认配置文件
                 logger.info("配置文件不存在，创建默认配置")
@@ -201,6 +220,24 @@ class ConfigManager:
             else:
                 result[key] = value
         return result
+
+    def _has_new_config_items(self, original: dict, merged: dict) -> bool:
+        """
+        检查合并后的配置是否包含原配置中没有的新项.
+        """
+        return self._count_config_items(merged) > self._count_config_items(original)
+
+    def _count_config_items(self, config: dict) -> int:
+        """
+        递归计算配置字典中的项目数量.
+        """
+        count = 0
+        for value in config.values():
+            if isinstance(value, dict):
+                count += self._count_config_items(value)
+            else:
+                count += 1
+        return count
 
     def get_config(self, path: str, default: Any = None) -> Any:
         """
