@@ -115,7 +115,7 @@ class Application:
                 AudioPlugin(),
                 WakeWordPlugin(),
                 CalendarPlugin(),
-                UIPlugin(mode="gui"),
+                UIPlugin(mode=mode),
                 ShortcutsPlugin(),
             )
             await self.plugins.setup_all(self)
@@ -124,7 +124,7 @@ class Application:
                 await self.plugins.notify_device_state_changed(self.device_state)
             except Exception:
                 pass
-            # await self.connect_protocol()
+            await self.connect_protocol()
             # 插件：start
             await self.plugins.start_all()
             # 等待关停
